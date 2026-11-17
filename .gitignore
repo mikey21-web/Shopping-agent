@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Runtime data and databases (never commit live data)
+server/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets — credentials must be provided via environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Coverage / test output
+coverage/

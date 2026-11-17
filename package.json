@@ -1,0 +1,22 @@
+{
+  "name": "sahipick",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SahiPick — shopping decision intelligence platform for Indian consumers",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "setup": "npm --prefix server install && npm --prefix web install",
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "npm --prefix server run dev",
+    "dev:web": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "start": "npm --prefix server run start",
+    "migrate": "npm --prefix server run migrate",
+    "seed": "npm --prefix server run seed",
+    "test": "npm --prefix server run test",
+    "typecheck": "npm --prefix server run typecheck && npm --prefix web run typecheck"
+  }
+}

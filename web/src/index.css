@@ -1,0 +1,117 @@
+@import 'tailwindcss';
+
+/*
+ * SahiPick design system.
+ *
+ * Mobile-first, dark by default (retail browsing at night is common), with a
+ * restrained accent palette. Provenance colours are deliberately distinct from
+ * price colours so that "this is sample data" never looks like a deal badge.
+ */
+
+@theme {
+  --color-ink-950: #060a13;
+  --color-ink-900: #0b1220;
+  --color-ink-850: #0f1728;
+  --color-ink-800: #141d31;
+  --color-ink-700: #1c2740;
+  --color-ink-600: #2a3852;
+  --color-ink-500: #435471;
+
+  --color-mist-50: #f5f7fb;
+  --color-mist-200: #d8deea;
+  --color-mist-400: #93a0ba;
+  --color-mist-500: #6d7c99;
+
+  --color-saffron-300: #fcd07a;
+  --color-saffron-400: #f5b544;
+  --color-saffron-500: #e59a1f;
+
+  --color-jade-300: #7fe3b8;
+  --color-jade-400: #41c88d;
+  --color-jade-500: #1ea76c;
+
+  --color-sky-300: #8ecbff;
+  --color-sky-400: #4aa8f0;
+
+  --color-rose-300: #ffa8a8;
+  --color-rose-400: #f46767;
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+html {
+  background-color: var(--color-ink-950);
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(245, 181, 68, 0.07), transparent 60%),
+    radial-gradient(900px 500px at 0% 0%, rgba(74, 168, 240, 0.06), transparent 55%),
+    var(--color-ink-950);
+  color: var(--color-mist-50);
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Focus rings that survive dark backgrounds. */
+:focus-visible {
+  outline: 2px solid var(--color-saffron-400);
+  outline-offset: 2px;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-ink-900);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink-700);
+  border-radius: 999px;
+  border: 2px solid var(--color-ink-900);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-600);
+}
+
+@keyframes shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--color-ink-800) 25%, var(--color-ink-700) 50%, var(--color-ink-800) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: 0.5rem;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.rise {
+  animation: rise 0.28s ease-out both;
+}
+
+/* Markdown-ish answer rendering from the agent. */
+.answer-body p { margin: 0 0 0.6rem; }
+.answer-body strong { color: var(--color-mist-50); font-weight: 650; }
+.answer-body em { color: var(--color-mist-400); font-style: normal; font-size: 0.875rem; }
+.answer-body code {
+  background: var(--color-ink-800);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.3rem;
+  font-size: 0.85em;
+}
