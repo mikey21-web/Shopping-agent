@@ -242,7 +242,7 @@ export function Ask() {
   const lastResponse = [...turns].reverse().find((turn) => turn.role === 'assistant')?.response;
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto max-w-5xl space-y-5">
       <div>
         <h1 className="text-xl font-bold tracking-tight">Ask SahiPick</h1>
         <p className="mt-1 text-xs leading-relaxed text-mist-500">
@@ -494,7 +494,7 @@ export function Ask() {
       ) : null}
 
       <form
-        className="sticky bottom-16 z-20 flex gap-2 sm:bottom-4"
+        className="sticky bottom-4 z-20 flex gap-2 border-t border-ink-700 bg-ink-950/85 p-3 backdrop-blur-md"
         onSubmit={(event) => {
           event.preventDefault();
           void send(message);
