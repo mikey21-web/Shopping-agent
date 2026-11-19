@@ -6,6 +6,13 @@ import { createApp } from './api/index.ts';
 import { config, hasRemoteLlm } from './config.ts';
 import { closeDb } from './db/index.ts';
 import { GroundedLocalProvider, OpenAiCompatibleProvider, setActiveProvider } from './ai/provider.ts';
+import { setBrowserAdapter } from './services/browser-manager.ts';
+import { SteelBrowserManager } from './services/steel-browser-manager.ts';
+
+if ((process.env.SAHIPICK_BROWSER_ENGINE ?? '').toLowerCase() === 'steel') {
+  setBrowserAdapter(new SteelBrowserManager());
+  console.log('[sahipick] browser engine: steel (Steel Browser)');
+}
 
 function configureAiProvider(): void {
   if (hasRemoteLlm()) {
