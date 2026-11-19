@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
 
-import { applySchema, closeDb, getDb, run } from '../src/db/index.ts';
+import { applySchema, run } from '../src/db/index.ts';
 import { listPurchasesByShopper, nextPurchaseId, recordPurchase, scoreProductAfterSales } from '../src/services/after-sales.ts';
 
 const productId = 'p-after-sales-test';
@@ -28,7 +28,6 @@ before(() => {
 after(() => {
   run('DELETE FROM purchases WHERE shopper_id = ?', shopperId);
   run('DELETE FROM products WHERE id = ?', productId);
-  closeDb();
 });
 
 test('after-sales scores an unknown product with the generic baseline', () => {
