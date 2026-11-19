@@ -2,8 +2,9 @@
  * SahiPick HTTP API.
  *
  * Every response that contains externally-sourced facts also carries the
- * provenance so the client can label sample vs live data. Routes never
- * fabricate data: when a source is unavailable the response says so.
+ * provenance so the client can show where a price came from. Routes never
+ * fabricate data: when a source is unavailable the response says so. The
+ * catalogue contains only products read from live retailer pages.
  */
 
 import express, { type Express, type Request, type Response } from 'express';
@@ -14,10 +15,12 @@ import { config } from '../config.ts';
 import { applySchema } from '../db/index.ts';
 import {
   getProduct,
+  getProduct as getProductRow,
   listProducts,
   searchProducts,
   listPricePoints,
 } from '../db/repositories.ts';
+import { deleteSampleRecords } from '../db/repositories.ts';
 import { buildComparison, buildProductView } from './services/product-view.ts';
 import { searchAllProviders, providerHealth, listProviders } from '../retailers/registry.ts';
 import { registerRetailerProviders } from '../retailers/providers.ts';
@@ -52,6 +55,9 @@ import { cacheStats } from '../intelligence/cache/cache.ts';
 import { FRESHNESS } from '../intelligence/cache/freshness.ts';
 import { formatPaise } from '../intelligence/normalize/specs.ts';
 import { computePriceStats } from '../intelligence/pricehistory/stats.ts';
+import { discoverLive, liveSourceStatus, queryFromBrief } from './services/live-catalogue.ts';
+import { listPurchasesByShopper, nextPurchaseId, recordPurchase, scoreProductAfterSales } from '../services/after-sales.ts';
+import { handleWhatsAppMessage } from '../channels/whatsapp-twilio.ts';
 
 export interface ShopperQuery {
   bank?: string | null;
@@ -82,8 +88,10 @@ function sendError(response: Response, status: number, code: string, message: st
 export function createApp(): Express {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ limit: '5kb' }));
 
   applySchema();
+  deleteSampleRecords();
   registerRetailerProviders();
 
   /* ---------------------------------------------------------------- */
@@ -99,6 +107,7 @@ export function createApp(): Express {
       aiProvider: config.aiProvider,
       remoteLlmConfigured: Boolean(config.aiBaseUrl && config.aiModel && config.aiApiKey),
       timeZone: 'Asia/Kolkata',
+      ...liveSourceStatus(),
     });
   });
 
@@ -107,7 +116,7 @@ export function createApp(): Express {
     response.json({
       providers: health,
       note:
-        'A provider that is not configured returns no products. SahiPick never substitutes demo data for a source it could not read.',
+        'A provider that is not configured returns no products. SahiPick never substitutes invented data for a source it could not read.',
     });
   });
 
@@ -115,21 +124,58 @@ export function createApp(): Express {
   /* Catalogue                                                         */
   /* ---------------------------------------------------------------- */
 
-  app.get('/api/products', (request, response) => {
+  app.get('/api/products', async (request, response) => {
     const category = typeof request.query.category === 'string' ? request.query.category : undefined;
     const term = typeof request.query.q === 'string' ? request.query.q.trim() : '';
-    const products = term ? searchProducts(term, category) : listProducts(category);
+
+    let products;
+    let live: Awaited<ReturnType<typeof discoverLive>> | null = null;
+    if (term) {
+      live = await discoverLive(term, { category, limit: 12 });
+      // The query is a natural brief ("running shoes under 5000"), not a
+      // literal product title. Return what discovery actually found, plus
+      // any exact catalogue matches from earlier runs.
+      const seen = new Set<string>();
+      products = [...live.products, ...searchProducts(term, category)].filter((product) => {
+        if (seen.has(product.id)) return false;
+        seen.add(product.id);
+        return true;
+      });
+    } else {
+      products = listProducts(category);
+    }
+
     response.json({
       count: products.length,
-      products: products.map((product) => ({
-        id: product.id,
-        displayName: product.displayName,
-        brand: product.brand,
-        model: product.model,
-        category: product.category,
-        imageUrl: product.imageUrl,
-        highlights: product.highlights,
-      })),
+      ...(live
+        ? {
+            live: {
+              pagesOpened: live.pagesOpened,
+              productsFound: live.productsFound,
+              sources: live.sources,
+              unavailable: live.unavailable,
+              notes: live.notes,
+              fromCache: live.fromCache,
+              elapsedMs: live.elapsedMs,
+            },
+          }
+        : { note: 'Showing products discovered earlier. Pass ?q=... to fetch live listings.' }),
+      products: products.map((product) => {
+        const view = buildProductView(product.id, { includePriceHistory: false });
+        return {
+          id: product.id,
+          displayName: product.displayName,
+          brand: product.brand,
+          model: product.model,
+          category: product.category,
+          imageUrl: product.imageUrl,
+          highlights: product.highlights,
+          bestPricePaise: view?.bestPayablePaise ?? null,
+          bestPriceLabel: view?.bestPayablePaise != null ? formatPaise(view.bestPayablePaise) : null,
+          bestRetailer: view?.listings.find((entry) => entry.listing.id === view.bestListingId)?.listing.retailer ?? null,
+          bestPriceIsSample: view?.bestPriceIsSample ?? false,
+        };
+      }),
     });
   });
 
@@ -189,11 +235,20 @@ export function createApp(): Express {
   /* ---------------------------------------------------------------- */
 
   app.get('/api/discover', async (request, response) => {
-    const query = typeof request.query.q === 'string' ? request.query.q : '';
+    const query = typeof request.query.q === 'string' ? request.query.q.trim() : '';
     const category = typeof request.query.category === 'string' ? request.query.category : undefined;
+    const searchTerm = queryFromBrief(query, category);
 
-    const catalogue = query
-      ? searchProducts(query, category)
+    const live = searchTerm
+      ? await discoverLive(searchTerm, { category, limit: 12 })
+      : null;
+    const seen = new Set<string>();
+    const catalogue = live
+      ? [...live.products, ...searchProducts(query, category)].filter((product) => {
+          if (seen.has(product.id)) return false;
+          seen.add(product.id);
+          return true;
+        })
       : listProducts(category);
 
     const remote = await searchAllProviders(query, {
@@ -202,17 +257,38 @@ export function createApp(): Express {
     });
 
     response.json({
-      catalogue: catalogue.map((product) => ({
-        id: product.id,
-        displayName: product.displayName,
-        brand: product.brand,
-        category: product.category,
-        imageUrl: product.imageUrl,
-        highlights: product.highlights,
-      })),
+      catalogue: catalogue.map((product) => {
+        const view = buildProductView(product.id, { includePriceHistory: false });
+        return {
+          id: product.id,
+          displayName: product.displayName,
+          brand: product.brand,
+          category: product.category,
+          imageUrl: product.imageUrl,
+          highlights: product.highlights,
+          bestPricePaise: view?.bestPayablePaise ?? null,
+          bestPriceLabel: view?.bestPayablePaise != null ? formatPaise(view.bestPayablePaise) : null,
+          bestRetailer: view?.listings.find((entry) => entry.listing.id === view.bestListingId)?.listing.retailer ?? null,
+          bestPriceIsSample: view?.bestPriceIsSample ?? false,
+        };
+      }),
       providers: remote.outcomes,
-      note:
-        'Catalogue entries are the bundled sample catalogue. Provider outcomes show which live retailers responded and which could not be read.',
+      ...(live
+        ? {
+            live: {
+              pagesOpened: live.pagesOpened,
+              productsFound: live.productsFound,
+              sources: live.sources,
+              unavailable: live.unavailable,
+              notes: live.notes,
+              fromCache: live.fromCache,
+              elapsedMs: live.elapsedMs,
+            },
+          }
+        : {}),
+      note: live
+        ? 'Products were read from live retailer pages. Sources that could not be read are listed instead of being replaced with invented data.'
+        : 'Enter a search term to fetch live products. Provider outcomes show which live retailers are configured.',
     });
   });
 
@@ -246,10 +322,16 @@ export function createApp(): Express {
   /* Recommendations & comparison                                     */
   /* ---------------------------------------------------------------- */
 
-  app.post('/api/recommendations', (request, response) => {
+  app.post('/api/recommendations', async (request, response) => {
     const rawQuery = typeof request.body?.query === 'string' ? request.body.query : '';
     const requirements = parseRequirements(rawQuery, request.body?.requirements ?? {});
     const shopper = shopperFromRequest(request);
+
+    const live = await discoverLive(queryFromBrief(rawQuery, requirements.category), {
+      category: requirements.category,
+      limit: 8,
+      maxPricePaise: requirements.budgetMaxPaise ?? null,
+    });
 
     const { candidates, notes } = buildCandidates(requirements.category ?? undefined, requirements, shopper);
     const result = buildRecommendationSet(candidates, requirements);
@@ -257,7 +339,8 @@ export function createApp(): Express {
     response.json({
       ...result,
       requirementSummary: describeRequirements(requirements),
-      notes: [...notes, ...result.dataQualityNotes],
+      notes: [...live.notes, ...notes, ...result.dataQualityNotes],
+      live: { productsFound: live.productsFound, sources: live.sources, fromCache: live.fromCache },
       missingInfo: requirements.missingInfo,
     });
   });
@@ -270,6 +353,52 @@ export function createApp(): Express {
     }
     const result = buildComparison(productIds.slice(0, 4), shopperFromRequest(request));
     response.json(result);
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* After-sales, purchases and WhatsApp                                */
+  /* ---------------------------------------------------------------- */
+
+  app.get('/api/after-sales/products/:productId', (request, response) => {
+    response.json(scoreProductAfterSales(request.params.productId));
+  });
+
+  app.get('/api/purchases', (request, response) => {
+    const shopperId = typeof request.query.shopperId === 'string' ? request.query.shopperId : '';
+    const limit = typeof request.query.limit === 'string' ? Number.parseInt(request.query.limit, 10) : 50;
+    response.json({
+      purchases: listPurchasesByShopper(shopperId, Number.isFinite(limit) && limit > 0 ? limit : 50),
+    });
+  });
+
+  app.post('/api/purchases', (request, response) => {
+    const productId = typeof request.body?.productId === 'string' ? request.body.productId : '';
+    if (!productId) {
+      sendError(response, 400, 'invalid_request', 'productId is required.');
+      return;
+    }
+    recordPurchase({
+      id: nextPurchaseId('purchase'),
+      shopperId: typeof request.body?.shopperId === 'string' ? request.body.shopperId : 'anonymous',
+      productId,
+      variantId: typeof request.body?.variantId === 'string' ? request.body.variantId : null,
+      category: request.body?.category ?? getProductRow(productId)?.category ?? 'other',
+      purchasedAt: new Date().toISOString(),
+      sourceUrl: typeof request.body?.sourceUrl === 'string' ? request.body.sourceUrl : null,
+      pricePaise: typeof request.body?.pricePaise === 'number' ? request.body.pricePaise : null,
+      source: ['web', 'whatsapp', 'import'].includes(request.body?.source as never) ? (request.body.source as never) : 'web',
+      notes: typeof request.body?.notes === 'string' ? request.body.notes : null,
+    });
+    response.json({ ok: true });
+  });
+
+  app.post('/api/whatsapp/message', async (request, response) => {
+    const body = request.body as { Body?: string; From?: string; To?: string };
+    const message = body.Body ?? '';
+    const from = body.From ?? '';
+    const to = body.To ?? '';
+    const sent = await handleWhatsAppMessage(message, from, to);
+    response.json({ ok: sent });
   });
 
   /* ---------------------------------------------------------------- */
@@ -413,10 +542,16 @@ export function createApp(): Express {
    * This is the multi-dimensional evaluation: hard constraints first, then
    * the eight intelligence dimensions, then the trace explaining the result.
    */
-  app.post('/api/decide', (request, response) => {
+  app.post('/api/decide', async (request, response) => {
     const rawQuery = typeof request.body?.query === 'string' ? request.body.query : '';
     const requirements = parseRequirements(rawQuery, request.body?.requirements ?? {});
     const shopper = shopperFromRequest(request);
+
+    const live = await discoverLive(queryFromBrief(rawQuery, requirements.category), {
+      category: requirements.category,
+      limit: 8,
+      maxPricePaise: requirements.budgetMaxPaise ?? null,
+    });
 
     const candidates = buildDecisionCandidates({
       shopper,
@@ -475,7 +610,8 @@ export function createApp(): Express {
       })),
       eliminated: result.eliminated,
       trace: result.trace,
-      limitations: result.limitations,
+      limitations: [...live.notes, ...result.limitations],
+      live: { productsFound: live.productsFound, sources: live.sources, fromCache: live.fromCache },
       missingInfo: requirements.missingInfo,
     });
   });

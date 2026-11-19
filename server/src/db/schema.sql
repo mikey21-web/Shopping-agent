@@ -250,3 +250,51 @@ CREATE TABLE IF NOT EXISTS research_conflicts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_research_conflicts_product ON research_conflicts(product_id);
+
+-- ---------------------------------------------------------------------
+-- After-sales coverage and purchase ownership
+-- ---------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS product_service_coverage (
+  id                TEXT PRIMARY KEY,
+  product_id        TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  retailer          TEXT NOT NULL,
+  provider_name     TEXT,
+  warranty_years    INTEGER,
+  warranty_days     INTEGER,
+  response_hours    INTEGER,
+  returns_days      INTEGER,
+  shipping_days     INTEGER,
+  warranty_claimed  INTEGER NOT NULL DEFAULT 1,
+  search_url        TEXT,
+  source_url        TEXT,
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_service_coverage_product_retailer ON product_service_coverage(product_id, retailer);
+
+CREATE TABLE IF NOT EXISTS after_sales_issues (
+  id                 TEXT PRIMARY KEY,
+  product_id         TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  category           TEXT NOT NULL,
+  symptom            TEXT NOT NULL,
+  report_ratio       REAL NOT NULL DEFAULT 0,
+  evidence_url       TEXT,
+  created_at         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_after_sales_issues_product ON after_sales_issues(product_id);
+
+CREATE TABLE IF NOT EXISTS purchases (
+  id                 TEXT PRIMARY KEY,
+  shopper_id         TEXT NOT NULL,
+  product_id         TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  variant_id         TEXT REFERENCES product_variants(id) ON DELETE SET NULL,
+  category           TEXT NOT NULL,
+  purchased_at       TEXT NOT NULL,
+  source_url         TEXT,
+  price_paise        INTEGER,
+  source             TEXT NOT NULL,
+  notes              TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_purchases_shopper ON purchases(shopper_id);
+CREATE INDEX IF NOT EXISTS idx_purchases_product ON purchases(product_id);
